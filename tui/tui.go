@@ -74,7 +74,7 @@ func NewRedisTUI(redisClient api.RedisClient, maxKeyLimit int, version string, g
 		version:             version,
 		gitCommit:           gitCommit,
 		focusPrimitives:     make([]primitiveKey, 0),
-		currentFocusIndex:   0,
+		currentFocusIndex:   3,
 		outputChan:          outputChan,
 		config:              conf,
 		keyBindings:         core.NewKeyBinding(),
@@ -130,7 +130,32 @@ func NewRedisTUI(redisClient api.RedisClient, maxKeyLimit int, version string, g
 				nextFocusIndex = 0
 			}
 
-			ui.app.SetFocus(ui.focusPrimitives[nextFocusIndex].Primitive)
+			// Reset all panel borders to white
+			ui.searchPanel.SetBorderColor(tcell.ColorWhite)
+			ui.keyItemsPanel.SetBorderColor(tcell.ColorWhite)
+			ui.mainPanel.SetBorderColor(tcell.ColorWhite)
+			ui.outputPanel.SetBorderColor(tcell.ColorWhite)
+			ui.commandPanel.SetBorderColor(tcell.ColorWhite)
+			ui.commandResultPanel.SetBorderColor(tcell.ColorWhite)
+
+			// Set focused panel border to green
+			nextPrimitive := ui.focusPrimitives[nextFocusIndex].Primitive
+			switch nextPrimitive {
+			case ui.searchPanel:
+				ui.searchPanel.SetBorderColor(tcell.ColorGreen)
+			case ui.keyItemsPanel:
+				ui.keyItemsPanel.SetBorderColor(tcell.ColorGreen)
+			case ui.mainPanel:
+				ui.mainPanel.SetBorderColor(tcell.ColorGreen)
+			case ui.outputPanel:
+				ui.outputPanel.SetBorderColor(tcell.ColorGreen)
+			case ui.commandPanel:
+				ui.commandPanel.SetBorderColor(tcell.ColorGreen)
+			case ui.commandResultPanel:
+				ui.commandResultPanel.SetBorderColor(tcell.ColorGreen)
+			}
+
+			ui.app.SetFocus(nextPrimitive)
 			ui.currentFocusIndex = nextFocusIndex
 
 			return nil
@@ -172,6 +197,7 @@ func NewRedisTUI(redisClient api.RedisClient, maxKeyLimit int, version string, g
 
 // Start create the ui and start the program
 func (ui *RedisTUI) Start() error {
+
 	go func() {
 		for {
 			select {
@@ -237,36 +263,14 @@ func (ui *RedisTUI) Start() error {
 			for i, k := range limit(keys, int(ui.maxKeyLimit)) {
 				ui.keyItemsPanel.AddItem(ui.keyItemsFormat(i, k), "", 0, ui.itemSelectedHandler(i, k))
 			}
-
-			ui.app.SetFocus(ui.keyItemsPanel)
+			// Set initial focus to search panel and make its border green
+			ui.searchPanel.SetBorderColor(tcell.ColorGreen)
+			ui.app.SetFocus(ui.searchPanel)
 		})
 	}()
 
 	ui.pages = tview.NewPages()
 	ui.pages.AddPage("base", ui.layout, true, true)
-	// welcomeScreen := tview.NewInputField().SetDrawFunc(func(screen tcell.Screen, x, y, width, height int) (i int, i2 int, i3 int, i4 int) {
-	// 	// Draw a horizontal line across the middle of the box.
-	// 	centerY := y + height/2
-	// 	for cx := x + 1; cx < x+width-1; cx++ {
-	// 		screen.SetContent(cx, centerY, tview.BoxDrawingsDoubleDownAndHorizontal, nil, tcell.StyleDefault.Foreground(tcell.ColorWhite))
-	// 	}
-	//
-	// 	// Write some text along the horizontal line.
-	// 	tview.Print(screen, " Hello, world! ", x+1, centerY, width-2, tview.AlignCenter, tcell.ColorYellow)
-	//
-	// 	// Space for other content.
-	// 	return x + 1, centerY + 1, width - 2, height - (centerY + 1 - y)
-	// })
-	//
-	// ui.pages.AddPage("welcome_screen", welcomeScreen, true, true)
-	//
-	// go func() {
-	// 	time.Sleep(2 * time.Second)
-	// 	ui.app.QueueUpdateDraw(func() {
-	// 		ui.pages.RemovePage("welcome_screen")
-	// 	})
-	// }()
-
 	return ui.app.SetRoot(ui.pages, true).Run()
 }
 
@@ -592,7 +596,7 @@ func (ui *RedisTUI) createKeyItemsPanel() *tview.List {
 		case tcell.KeyRune:
 			if event.Rune() == 'd' || event.Rune() == 'D' {
 				currentItem := keyItemsList.GetCurrentItem()
-				if currentItem == -1 {
+				if currentItem == -1 || currentItem >= keyItemsList.GetItemCount() {
 					return event
 				}
 
