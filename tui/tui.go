@@ -49,7 +49,7 @@ type RedisTUI struct {
 
 	itemSelectedHandler func(index int, key string) func()
 
-	maxKeyLimit       int
+	maxKeyLimit       int64
 	maxCharacterLimit int
 
 	version   string
@@ -69,7 +69,7 @@ type RedisTUI struct {
 func NewRedisTUI(redisClient api.RedisClient, maxKeyLimit int, version string, gitCommit string, outputChan chan core.OutputMessage, conf config.Config) *RedisTUI {
 	ui := &RedisTUI{
 		redisClient:         redisClient,
-		maxKeyLimit:         maxKeyLimit,
+		maxKeyLimit:         int64(maxKeyLimit),
 		maxCharacterLimit:   maxKeyLimit * 20,
 		version:             version,
 		gitCommit:           gitCommit,
@@ -234,7 +234,7 @@ func (ui *RedisTUI) Start() error {
 		ui.app.QueueUpdateDraw(func() {
 			ui.summaryPanel.SetText(fmt.Sprintf(" Total matched: %d", len(keys)))
 
-			for i, k := range limit(keys, ui.maxKeyLimit) {
+			for i, k := range limit(keys, int(ui.maxKeyLimit)) {
 				ui.keyItemsPanel.AddItem(ui.keyItemsFormat(i, k), "", 0, ui.itemSelectedHandler(i, k))
 			}
 
@@ -483,6 +483,55 @@ func (ui *RedisTUI) createSearchPanel() *tview.InputField {
 	var currentIndex = -1
 	searchArea.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
+		case tcell.KeyCtrlD:
+			// Get all keys in current list
+			count := ui.keyItemsPanel.GetItemCount()
+			if count == 0 {
+				return event
+			}
+
+			// Create confirmation dialog
+			modal := tview.NewModal().
+				SetText(fmt.Sprintf("Are you sure you want to delete these %d keys?", count)).
+				AddButtons([]string{"Confirm", "Cancel"}).
+				SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+					if buttonIndex == 0 { // Confirmed deletion
+						go func() {
+							var deletedCount = 0
+							for i := 0; i < count; i++ {
+								mainText, _ := ui.keyItemsPanel.GetItemText(i)
+								key := strings.TrimSpace(strings.Split(mainText, "|")[1])
+
+								if err := ui.redisClient.Del(key).Err(); err != nil {
+									ui.outputChan <- core.OutputMessage{
+										Color:   tcell.ColorRed,
+										Message: fmt.Sprintf("Failed to delete key %s: %s", key, err),
+									}
+								} else {
+									deletedCount++
+								}
+							}
+
+							ui.outputChan <- core.OutputMessage{
+								Color:   tcell.ColorGreen,
+								Message: fmt.Sprintf("Successfully deleted %d keys", deletedCount),
+							}
+
+							// Clear list
+							ui.uiViewUpdateChan <- func() {
+								ui.keyItemsPanel.Clear()
+								ui.summaryPanel.SetText("Total matched: 0")
+							}
+						}()
+					}
+					ui.pages.RemovePage("confirm-delete")
+					ui.app.SetFocus(searchArea)
+				})
+
+			// Show confirmation dialog
+			ui.pages.AddPage("confirm-delete", modal, true, true)
+			ui.app.SetFocus(modal)
+			return nil
 		case tcell.KeyUp:
 			if len(ui.searchKeyHistories) == 0 {
 				break
@@ -533,12 +582,7 @@ func (ui *RedisTUI) createSearchPanel() *tview.InputField {
 		var keys []string
 		var err error
 
-		// if text == "" || text == "*" {
-		// 	keys, _, err = ui.redisClient.Scan(0, text, ui.maxKeyLimit).Result()
-		// } else {
-		// 	keys, err = ui.redisClient.Keys(text).Result()
-		// }
-		keys, err = api.RedisKeys(ui.redisClient, text)
+		keys, _, err = ui.redisClient.Scan(0, text, int64(ui.maxKeyLimit)).Result()
 
 		if err != nil {
 			ui.outputChan <- core.OutputMessage{Color: tcell.ColorRed, Message: fmt.Sprintf("errors: %s", err)}

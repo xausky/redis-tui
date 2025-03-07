@@ -27,6 +27,7 @@ type RedisClient interface {
 	Process(cmd redis.Cmder) error
 	Do(args ...interface{}) *redis.Cmd
 	Info(section ...string) *redis.StringCmd
+	Del(key ...string) *redis.IntCmd
 }
 
 // NewRedisClient create a new redis client which wraps single or cluster client
@@ -114,7 +115,7 @@ func KeysWithLimit(client RedisClient, key string, maxScanCount int) (redisKeys 
 	var keys []string
 
 	var scanCount = 0
-	for scanCount < maxScanCount || maxScanCount == -1{
+	for scanCount < maxScanCount || maxScanCount == -1 {
 		scanCount++
 
 		keys, cursor, err = client.Scan(cursor, key, 100).Result()
