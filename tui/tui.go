@@ -484,54 +484,7 @@ func (ui *RedisTUI) createSearchPanel() *tview.InputField {
 	searchArea.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyCtrlD:
-			// Get all keys in current list
-			count := ui.keyItemsPanel.GetItemCount()
-			if count == 0 {
-				return event
-			}
-
-			// Create confirmation dialog
-			modal := tview.NewModal().
-				SetText(fmt.Sprintf("Are you sure you want to delete these %d keys?", count)).
-				AddButtons([]string{"Confirm", "Cancel"}).
-				SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-					if buttonIndex == 0 { // Confirmed deletion
-						go func() {
-							var deletedCount = 0
-							for i := 0; i < count; i++ {
-								mainText, _ := ui.keyItemsPanel.GetItemText(i)
-								key := strings.TrimSpace(strings.Split(mainText, "|")[1])
-
-								if err := ui.redisClient.Del(key).Err(); err != nil {
-									ui.outputChan <- core.OutputMessage{
-										Color:   tcell.ColorRed,
-										Message: fmt.Sprintf("Failed to delete key %s: %s", key, err),
-									}
-								} else {
-									deletedCount++
-								}
-							}
-
-							ui.outputChan <- core.OutputMessage{
-								Color:   tcell.ColorGreen,
-								Message: fmt.Sprintf("Successfully deleted %d keys", deletedCount),
-							}
-
-							// Clear list
-							ui.uiViewUpdateChan <- func() {
-								ui.keyItemsPanel.Clear()
-								ui.summaryPanel.SetText("Total matched: 0")
-							}
-						}()
-					}
-					ui.pages.RemovePage("confirm-delete")
-					ui.app.SetFocus(searchArea)
-				})
-
-			// Show confirmation dialog
-			ui.pages.AddPage("confirm-delete", modal, true, true)
-			ui.app.SetFocus(modal)
-			return nil
+			return ui.handleBulkDelete()
 		case tcell.KeyUp:
 			if len(ui.searchKeyHistories) == 0 {
 				break
@@ -623,14 +576,59 @@ func (ui *RedisTUI) createSearchPanel() *tview.InputField {
 
 		return
 	})
-	searchArea.SetBorder(true).SetTitle(fmt.Sprintf(" Search (%s) ", ui.keyBindings.Name("search")))
+	searchArea.SetBorder(true).SetTitle(fmt.Sprintf(" Search (Ctrl+D to delete matched) (%s) ", ui.keyBindings.Name("search")))
 	return searchArea
 }
 
 // createKeyItemsPanel create key items panel
 func (ui *RedisTUI) createKeyItemsPanel() *tview.List {
 	keyItemsList := tview.NewList().ShowSecondaryText(false)
-	keyItemsList.SetBorder(true).SetTitle(fmt.Sprintf(" Keys (%s) ", ui.keyBindings.Name("keys")))
+	keyItemsList.SetBorder(true).SetTitle(fmt.Sprintf(" Keys (Ctrl+D to delete all, D to delete current) (%s) ", ui.keyBindings.Name("keys")))
+
+	keyItemsList.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyCtrlD:
+			return ui.handleBulkDelete()
+		case tcell.KeyRune:
+			if event.Rune() == 'd' || event.Rune() == 'D' {
+				currentItem := keyItemsList.GetCurrentItem()
+				if currentItem == -1 {
+					return event
+				}
+
+				mainText, _ := keyItemsList.GetItemText(currentItem)
+				key := strings.TrimSpace(strings.Split(mainText, "|")[1])
+
+				modal := tview.NewModal().
+					SetText(fmt.Sprintf("Are you sure you want to delete key '%s'?", key)).
+					AddButtons([]string{"Confirm", "Cancel"}).
+					SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+						if buttonIndex == 0 {
+							if err := ui.redisClient.Del(key).Err(); err != nil {
+								ui.outputChan <- core.OutputMessage{
+									Color:   tcell.ColorRed,
+									Message: fmt.Sprintf("Failed to delete key %s: %s", key, err),
+								}
+							} else {
+								ui.outputChan <- core.OutputMessage{
+									Color:   tcell.ColorGreen,
+									Message: fmt.Sprintf("Successfully deleted key %s", key),
+								}
+								keyItemsList.RemoveItem(currentItem)
+							}
+						}
+						ui.pages.RemovePage("confirm-delete-single")
+						ui.app.SetFocus(keyItemsList)
+					})
+
+				ui.pages.AddPage("confirm-delete-single", modal, true, true)
+				ui.app.SetFocus(modal)
+				return nil
+			}
+		}
+		return event
+	})
+
 	return keyItemsList
 }
 
@@ -834,4 +832,52 @@ func limit(input []string, maxReturn int) []string {
 	}
 
 	return input[:maxReturn]
+}
+
+// Add this helper function to handle bulk deletion
+func (ui *RedisTUI) handleBulkDelete() *tcell.EventKey {
+	count := ui.keyItemsPanel.GetItemCount()
+	if count == 0 {
+		return nil
+	}
+
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Are you sure you want to delete these %d keys?", count)).
+		AddButtons([]string{"Confirm", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonIndex == 0 {
+				go func() {
+					var deletedCount = 0
+					for i := 0; i < count; i++ {
+						mainText, _ := ui.keyItemsPanel.GetItemText(i)
+						key := strings.TrimSpace(strings.Split(mainText, "|")[1])
+
+						if err := ui.redisClient.Del(key).Err(); err != nil {
+							ui.outputChan <- core.OutputMessage{
+								Color:   tcell.ColorRed,
+								Message: fmt.Sprintf("Failed to delete key %s: %s", key, err),
+							}
+						} else {
+							deletedCount++
+						}
+					}
+
+					ui.outputChan <- core.OutputMessage{
+						Color:   tcell.ColorGreen,
+						Message: fmt.Sprintf("Successfully deleted %d keys", deletedCount),
+					}
+
+					ui.uiViewUpdateChan <- func() {
+						ui.keyItemsPanel.Clear()
+						ui.summaryPanel.SetText("Total matched: 0")
+					}
+				}()
+			}
+			ui.pages.RemovePage("confirm-delete")
+			ui.app.SetFocus(ui.searchPanel)
+		})
+
+	ui.pages.AddPage("confirm-delete", modal, true, true)
+	ui.app.SetFocus(modal)
+	return nil
 }
