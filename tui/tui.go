@@ -13,8 +13,13 @@ import (
 	"github.com/rivo/tview"
 )
 
+type Widget interface {
+	tview.Primitive
+	SetBorderColor(color tcell.Color) *tview.Box
+}
+
 type primitiveKey struct {
-	Primitive tview.Primitive
+	Primitive Widget
 	Key       string
 }
 
@@ -131,30 +136,13 @@ func NewRedisTUI(redisClient api.RedisClient, maxKeyLimit int, version string, g
 			}
 
 			// Reset all panel borders to white
-			ui.searchPanel.SetBorderColor(tcell.ColorWhite)
-			ui.keyItemsPanel.SetBorderColor(tcell.ColorWhite)
-			ui.mainPanel.SetBorderColor(tcell.ColorWhite)
-			ui.outputPanel.SetBorderColor(tcell.ColorWhite)
-			ui.commandPanel.SetBorderColor(tcell.ColorWhite)
-			ui.commandResultPanel.SetBorderColor(tcell.ColorWhite)
 
+			for i := 0; i < len(ui.focusPrimitives); i++ {
+				ui.focusPrimitives[i].Primitive.SetBorderColor(tcell.ColorWhite)
+			}
 			// Set focused panel border to green
 			nextPrimitive := ui.focusPrimitives[nextFocusIndex].Primitive
-			switch nextPrimitive {
-			case ui.searchPanel:
-				ui.searchPanel.SetBorderColor(tcell.ColorGreen)
-			case ui.keyItemsPanel:
-				ui.keyItemsPanel.SetBorderColor(tcell.ColorGreen)
-			case ui.mainPanel:
-				ui.mainPanel.SetBorderColor(tcell.ColorGreen)
-			case ui.outputPanel:
-				ui.outputPanel.SetBorderColor(tcell.ColorGreen)
-			case ui.commandPanel:
-				ui.commandPanel.SetBorderColor(tcell.ColorGreen)
-			case ui.commandResultPanel:
-				ui.commandResultPanel.SetBorderColor(tcell.ColorGreen)
-			}
-
+			nextPrimitive.SetBorderColor(tcell.ColorGreen)
 			ui.app.SetFocus(nextPrimitive)
 			ui.currentFocusIndex = nextFocusIndex
 
@@ -596,7 +584,7 @@ func (ui *RedisTUI) createKeyItemsPanel() *tview.List {
 		case tcell.KeyRune:
 			if event.Rune() == 'd' || event.Rune() == 'D' {
 				currentItem := keyItemsList.GetCurrentItem()
-				if currentItem == -1 || currentItem >= keyItemsList.GetItemCount() {
+				if currentItem == -1 || currentItem > keyItemsList.GetItemCount() {
 					return event
 				}
 
